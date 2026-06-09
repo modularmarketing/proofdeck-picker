@@ -1,0 +1,121 @@
+<!doctype html>
+<!--
+  ProofDeck Drive folder picker — hosted on GitHub Pages.
+
+  Why this lives outside the extension: Manifest V3 forbids loading
+  remote scripts (apis.google.com/js/api.js) into extension pages, and
+  sandboxed iframes get a null origin that Google's Picker rejects.
+  Hosting this single page on a regular HTTPS origin sidesteps both
+  problems — Picker loads normally, then posts the chosen folder back
+  to the ProofDeck extension via chrome.runtime.sendMessage.
+
+  The ProofDeck extension declares externally_connectable matching
+  https://modularmarketing.github.io/* in its manifest, which authorises
+  this page to send messages to it.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProofDeck — Pick a Drive folder</title>
+  <style>
+    html, body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .status { padding: 24px; color: #444; font-size: 14px; }
+    .status.error { color: #b00020; }
+  </style>
+</head>
+<body>
+  <div class="status" id="status">Loading folder picker…</div>
+  <script src="https://apis.google.com/js/api.js"></script>
+  <script>
+    (function () {
+      const EXTENSION_ID = 'emcjfafkobdlmnnekloolkogbnfcfbpo';
+      const PICKER_API_KEY = 'AIzaSyAb8uN8phXBRIVVmNRRP3GZa8JiL-pLkqA';
+      const APP_ID = '755528840480';
+
+      const statusEl = document.getElementById('status');
+      function showError(text) {
+        statusEl.textContent = text;
+        statusEl.classList.add('error');
+      }
+
+      function sendToExtension(payload) {
+        try {
+          chrome.runtime.sendMessage(EXTENSION_ID, { source: 'proofdeck-picker', ...payload }, () => {
+            // Callback ignored — sender doesn't care about the response.
+            // chrome.runtime.lastError is checked implicitly.
+            void chrome.runtime.lastError;
+          });
+        } catch (e) {
+          showError('Could not reach the ProofDeck extension. Make sure it is installed and reload this page.');
+        }
+      }
+
+      function getToken() {
+        const params = new URLSearchParams(location.hash.slice(1));
+        return params.get('token');
+      }
+
+      function openPicker(accessToken) {
+        if (!window.gapi) {
+          showError('Failed to load Google API library. Check your network connection.');
+          sendToExtension({ type: 'error', message: 'gapi missing' });
+          return;
+        }
+        gapi.load('picker', {
+          callback: () => {
+            try {
+              const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+                .setSelectFolderEnabled(true)
+                .setMimeTypes('application/vnd.google-apps.folder')
+                .setIncludeFolders(true)
+                .setParent('root');
+
+              const picker = new google.picker.PickerBuilder()
+                .setOAuthToken(accessToken)
+                .setDeveloperKey(PICKER_API_KEY)
+                .setAppId(APP_ID)
+                .addView(view)
+                .setTitle('Choose a folder to save ProofDeck captures')
+                .setCallback((data) => {
+                  const action = data[google.picker.Response.ACTION];
+                  if (action === google.picker.Action.PICKED) {
+                    const doc = data[google.picker.Response.DOCUMENTS]?.[0];
+                    if (!doc) { sendToExtension({ type: 'cancelled' }); return; }
+                    sendToExtension({
+                      type: 'picked',
+                      folder: {
+                        folderId: doc.id,
+                        folderName: doc.name,
+                        displayPath: doc.name,
+                      },
+                    });
+                  } else if (action === google.picker.Action.CANCEL) {
+                    sendToExtension({ type: 'cancelled' });
+                  }
+                })
+                .build();
+              picker.setVisible(true);
+              statusEl.style.display = 'none';
+            } catch (e) {
+              showError('Picker failed to open: ' + (e?.message || e));
+              sendToExtension({ type: 'error', message: e?.message || String(e) });
+            }
+          },
+          onerror: () => {
+            showError('Failed to load the Picker module.');
+            sendToExtension({ type: 'error', message: 'gapi.load(picker) failed' });
+          },
+        });
+      }
+
+      const token = getToken();
+      if (!token) {
+        showError('No OAuth token provided. This page must be opened by the ProofDeck extension.');
+        return;
+      }
+      openPicker(token);
+    })();
+  </script>
+</body>
+</html>
