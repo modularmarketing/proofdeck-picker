@@ -65,17 +65,29 @@
         gapi.load('picker', {
           callback: () => {
             try {
-              const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+              // My Drive folders.
+              const myDriveView = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
                 .setSelectFolderEnabled(true)
                 .setMimeTypes('application/vnd.google-apps.folder')
                 .setIncludeFolders(true)
+                .setEnableDrives(true) // surface Shared Drive folders too
                 .setParent('root');
+
+              // Dedicated Shared Drives tab so users can navigate org-owned
+              // drives without filtering through My Drive.
+              const sharedDrivesView = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+                .setSelectFolderEnabled(true)
+                .setMimeTypes('application/vnd.google-apps.folder')
+                .setIncludeFolders(true)
+                .setEnableDrives(true);
 
               const picker = new google.picker.PickerBuilder()
                 .setOAuthToken(accessToken)
                 .setDeveloperKey(PICKER_API_KEY)
                 .setAppId(APP_ID)
-                .addView(view)
+                .enableFeature(google.picker.Feature.SUPPORT_DRIVES)
+                .addView(myDriveView)
+                .addView(sharedDrivesView)
                 .setTitle('Choose a folder to save ProofDeck captures')
                 .setCallback((data) => {
                   const action = data[google.picker.Response.ACTION];
